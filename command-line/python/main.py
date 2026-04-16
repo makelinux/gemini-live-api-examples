@@ -18,6 +18,8 @@ MODEL = "gemini-3.1-flash-live-preview"
 CONFIG = {
     "response_modalities": ["AUDIO"],
     "system_instruction": "You are a helpful and friendly AI assistant.",
+    "output_audio_transcription": {},
+    "input_audio_transcription": {},
 }
 
 audio_queue_output = asyncio.Queue()
@@ -50,13 +52,31 @@ async def send_realtime(session):
 
 async def receive_audio(session):
     """Receives responses from GenAI and puts audio data into the speaker audio queue."""
+    last_was_input = False
     while True:
         turn = session.receive()
         async for response in turn:
-            if (response.server_content and response.server_content.model_turn):
-                for part in response.server_content.model_turn.parts:
+            sc = response.server_content
+            if not sc:
+                continue
+            if sc.model_turn:
+                for part in sc.model_turn.parts:
                     if part.inline_data and isinstance(part.inline_data.data, bytes):
                         audio_queue_output.put_nowait(part.inline_data.data)
+            if sc.output_transcription:
+                if last_was_input:
+                    print()
+                    last_was_input = False
+                t = sc.output_transcription.text
+                print(t, end="", flush=True)
+                if t.rstrip()[-1:] in '.!?':
+                    print()
+            if sc.input_transcription:
+                if not last_was_input:
+                    print()
+                    last_was_input = True
+                print(f"\033[3m{sc.input_transcription.text}\033[0m",
+                      end="", flush=True)
 
         # Empty the queue on interruption to stop playback
         while not audio_queue_output.empty():
